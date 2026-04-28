@@ -1,0 +1,228 @@
+/* =============================================
+   ETG TRAVELS — Onboarding Module
+   ============================================= */
+
+const SERVICES_LIST = ['Visa', 'Insurance', 'Flight', 'Hotel', 'International Holiday', 'Domestic Holiday', 'Passport', 'Travel Package'];
+const COUNTRIES_LIST = ['India','United Kingdom','United States','France','Germany','Australia','Japan','Canada','UAE','Singapore','Thailand','Malaysia','Sri Lanka','Italy','Spain','Switzerland','New Zealand','South Korea','Indonesia','Turkey','Egypt','South Africa','Brazil','Maldives','Greece','Netherlands','Vietnam','China','Russia','Saudi Arabia'];
+const ACCOUNTS_LIST = ['Company Account', 'Sujith Account', 'Kalanthar Account'];
+
+function renderOnboard() {
+  const bookings = getData('etg_bookings') || [];
+  let rows = '';
+  if (bookings.length === 0) {
+    rows = '<div class="no-data"><i class="fa-solid fa-plane-circle-xmark"></i><p>No bookings yet. Create your first booking!</p></div>';
+  } else {
+    rows = `<div class="table-container"><table><thead><tr>
+      <th>Code</th><th>Customer</th><th>Phone</th><th>Services</th><th>Country</th><th>Total</th><th>Payment</th><th>Account</th><th>Status</th><th>Date</th><th>Actions</th>
+    </tr></thead><tbody>${bookings.map(b => {
+      const total = (parseFloat(b.costPaid)||0)+(parseFloat(b.visaFee)||0)+(parseFloat(b.otherFee)||0)+(parseFloat(b.serviceFee)||0);
+      const pmBadge = b.paymentMode === 'Online' ? 'badge-success' : b.paymentMode === 'Cash' ? 'badge-info' : 'badge-warning';
+      return `<tr>
+        <td><span class="badge badge-gold">ETG-${b.custCode}</span></td>
+        <td>${b.custName}</td><td>${b.phone}</td>
+        <td>${(b.services||[]).map(s=>`<span class="badge badge-info" style="margin:2px;">${s}</span>`).join('')}</td>
+        <td>${b.country}</td>
+        <td>₹${total.toLocaleString('en-IN')}</td>
+        <td><span class="badge ${pmBadge}">${b.paymentMode || '—'}</span></td>
+        <td>${b.paymentMode === 'Online' ? (b.transferAccount || '—') : '—'}</td>
+        <td><span class="badge ${b.status==='Completed'?'badge-success':b.status==='Cancelled'?'badge-danger':b.status==='Confirmed'?'badge-info':'badge-warning'}">${b.status}</span></td>
+        <td>${b.bookingDate}</td>
+        <td>
+          <button class="btn-icon" onclick="editBooking('${b.custCode}')"><i class="fa-solid fa-pen"></i></button>
+          <button class="btn-icon" onclick="deleteBooking('${b.custCode}')" style="margin-left:4px;"><i class="fa-solid fa-trash"></i></button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody></table></div>`;
+  }
+
+  document.getElementById('onboardContent').innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <h3><i class="fa-solid fa-clipboard-list"></i> All Bookings</h3>
+        <button class="btn btn-gold btn-sm" onclick="openBookingModal()"><i class="fa-solid fa-plus"></i> New Booking</button>
+      </div>${rows}
+    </div>`;
+}
+
+function buildBookingFormHTML(booking) {
+  const isEdit = !!booking;
+  const selectedServices = booking ? (booking.services || []) : [];
+  const servicesHTML = SERVICES_LIST.map(s => {
+    const checked = selectedServices.includes(s);
+    return `<label class="checkbox-item ${checked?'checked':''}" onclick="toggleService(this)">
+      <input type="checkbox" value="${s}" ${checked?'checked':''}> ${s}
+    </label>`;
+  }).join('');
+  const countriesHTML = COUNTRIES_LIST.map(c => `<option ${booking&&booking.country===c?'selected':''}>${c}</option>`).join('');
+  const pm = booking ? (booking.paymentMode || '') : '';
+  const acc = booking ? (booking.transferAccount || '') : '';
+  const showAcc = pm === 'Online';
+  const accOpts = ACCOUNTS_LIST.map(a => `<option value="${a}" ${acc===a?'selected':''}>${a}</option>`).join('');
+
+  return `
+    <div class="form-grid">
+      <div class="form-group-app"><label>Customer Code</label><input type="text" id="bkCustCode" value="${booking?'ETG-'+booking.custCode:'Auto-generated'}" disabled style="opacity:0.6;"></div>
+      <div class="form-group-app"><label>Booking Date</label><input type="date" id="bkDate" value="${booking?booking.bookingDate:new Date().toISOString().split('T')[0]}"></div>
+      <div class="form-group-app"><label>Customer Name *</label><input type="text" id="bkName" value="${booking?booking.custName:''}"></div>
+      <div class="form-group-app"><label>Contact Number</label><input type="tel" id="bkPhone" value="${booking?booking.phone:''}"></div>
+      <div class="form-group-app"><label>Email ID</label><input type="email" id="bkEmail" value="${booking?booking.email:''}"></div>
+      <div class="form-group-app"><label>Country</label><select id="bkCountry">${countriesHTML}</select></div>
+    </div>
+    <div class="form-group-app mt-16"><label>Services (Select up to 3) <span id="svcCount" style="color:var(--gold);">(${selectedServices.length}/3)</span></label>
+      <div class="checkbox-group" id="bkServices">${servicesHTML}</div>
+    </div>
+    <div class="form-grid mt-16">
+      <div class="form-group-app"><label>Cost Paid (₹)</label><input type="number" id="bkCost" value="${booking?booking.costPaid:'0'}" min="0" oninput="calcServiceFee()"></div>
+      <div class="form-group-app"><label>Visa Fee (₹)</label><input type="number" id="bkVisa" value="${booking?booking.visaFee:'0'}" min="0" oninput="calcServiceFee()"></div>
+      <div class="form-group-app"><label>Other Fee (₹)</label><input type="number" id="bkOther" value="${booking?booking.otherFee:'0'}" min="0" oninput="calcServiceFee()"></div>
+      <div class="form-group-app"><label>Service Fee (₹) <span style="font-size:0.65rem;color:var(--gold);">(Auto)</span></label><input type="number" id="bkService" value="${booking?booking.serviceFee:'0'}" readonly style="opacity:0.7;cursor:not-allowed;"></div>
+    </div>
+    <div class="form-grid mt-16">
+      <div class="form-group-app"><label>GST %</label><input type="number" id="bkGstPct" value="${booking&&booking.gstPct?booking.gstPct:'0'}" min="0" max="100" step="0.1" oninput="calcServiceFee()"></div>
+      <div class="form-group-app"><label>TDS %</label><input type="number" id="bkTdsPct" value="${booking&&booking.tdsPct?booking.tdsPct:'0'}" min="0" max="100" step="0.1" oninput="calcServiceFee()"></div>
+      <div class="form-group-app"><label>TCS %</label><input type="number" id="bkTcsPct" value="${booking&&booking.tcsPct?booking.tcsPct:'0'}" min="0" max="100" step="0.1" oninput="calcServiceFee()"></div>
+      <div class="form-group-app"><label>Grand Total (₹)</label><input type="number" id="bkGrandTotal" value="${booking&&booking.grandTotal?booking.grandTotal:'0'}" readonly style="opacity:0.7;cursor:not-allowed;font-weight:700;"></div>
+    </div>
+    <div class="form-group-app mt-16">
+      <label>Payment Mode * <span style="font-size:0.65rem;color:var(--danger);">(Mandatory)</span></label>
+      <div class="payment-mode-group" id="paymentModeGroup">
+        <label class="payment-mode-option ${pm==='Online'?'selected':''}" onclick="selectPaymentMode('Online')">
+          <input type="radio" name="paymentMode" value="Online" ${pm==='Online'?'checked':''}><i class="fa-solid fa-globe"></i><span>Online</span>
+        </label>
+        <label class="payment-mode-option ${pm==='Cash'?'selected':''}" onclick="selectPaymentMode('Cash')">
+          <input type="radio" name="paymentMode" value="Cash" ${pm==='Cash'?'checked':''}><i class="fa-solid fa-money-bill-wave"></i><span>Cash</span>
+        </label>
+        <label class="payment-mode-option ${pm==='Payment Pending'?'selected':''}" onclick="selectPaymentMode('Payment Pending')">
+          <input type="radio" name="paymentMode" value="Payment Pending" ${pm==='Payment Pending'?'checked':''}><i class="fa-solid fa-hourglass-half"></i><span>Pending</span>
+        </label>
+      </div>
+    </div>
+    <div class="form-group-app mt-16" id="transferAccountSection" style="display:${showAcc?'block':'none'};">
+      <label>Transfer To Account *</label>
+      <select id="bkTransferAccount"><option value="">-- Select Account --</option>${accOpts}</select>
+    </div>
+    <div class="form-group-app mt-16"><label>Status</label><select id="bkStatus">
+      ${['Pending','Confirmed','Completed','Cancelled'].map(s => `<option ${booking&&booking.status===s?'selected':''}>${s}</option>`).join('')}
+    </select></div>
+    <button class="btn btn-gold w-full mt-16" onclick="${isEdit?`saveEditBooking('${booking.custCode}')`:'saveBooking()'}">
+      <i class="fa-solid fa-save"></i> ${isEdit?'Update':'Save'} Booking
+    </button>`;
+}
+
+function openBookingModal(booking) {
+  openModal(booking ? 'Edit Booking' : 'New Customer Booking', buildBookingFormHTML(booking));
+}
+
+function selectPaymentMode(mode) {
+  document.querySelectorAll('.payment-mode-option').forEach(el => el.classList.remove('selected'));
+  const radio = document.querySelector(`input[name="paymentMode"][value="${mode}"]`);
+  if (radio) { radio.checked = true; radio.closest('.payment-mode-option').classList.add('selected'); }
+  const sec = document.getElementById('transferAccountSection');
+  if (sec) sec.style.display = mode === 'Online' ? 'block' : 'none';
+}
+
+const MAX_SERVICES = 3;
+function toggleService(el) {
+  const isChecked = el.classList.contains('checked');
+  if (!isChecked) {
+    const currentCount = document.querySelectorAll('#bkServices .checkbox-item.checked').length;
+    if (currentCount >= MAX_SERVICES) { showToast(`Maximum ${MAX_SERVICES} services allowed`, 'error'); return; }
+    el.classList.add('checked'); el.querySelector('input').checked = true;
+  } else { el.classList.remove('checked'); el.querySelector('input').checked = false; }
+  updateServiceCount();
+}
+function updateServiceCount() {
+  const count = document.querySelectorAll('#bkServices .checkbox-item.checked').length;
+  const counter = document.getElementById('svcCount');
+  if (counter) counter.textContent = `(${count}/${MAX_SERVICES})`;
+}
+function getSelectedServices() {
+  return Array.from(document.querySelectorAll('#bkServices .checkbox-item')).filter(i => i.classList.contains('checked')).map(i => i.querySelector('input').value);
+}
+function getPaymentData() {
+  const r = document.querySelector('input[name="paymentMode"]:checked');
+  const pm = r ? r.value : '';
+  const acc = pm === 'Online' ? (document.getElementById('bkTransferAccount').value || '') : '';
+  return { paymentMode: pm, transferAccount: acc };
+}
+
+function calcServiceFee() {
+  const cost = parseFloat(document.getElementById('bkCost').value) || 0;
+  const visa = parseFloat(document.getElementById('bkVisa').value) || 0;
+  const other = parseFloat(document.getElementById('bkOther').value) || 0;
+  const serviceFee = cost - visa - other;
+  document.getElementById('bkService').value = serviceFee >= 0 ? serviceFee : 0;
+  const subtotal = cost + visa + other + (serviceFee >= 0 ? serviceFee : 0);
+  const gstPct = parseFloat(document.getElementById('bkGstPct').value) || 0;
+  const tdsPct = parseFloat(document.getElementById('bkTdsPct').value) || 0;
+  const tcsPct = parseFloat(document.getElementById('bkTcsPct').value) || 0;
+  const grandTotal = subtotal + Math.round(subtotal * gstPct / 100) + Math.round(subtotal * tcsPct / 100) - Math.round(subtotal * tdsPct / 100);
+  document.getElementById('bkGrandTotal').value = grandTotal >= 0 ? grandTotal : 0;
+}
+
+function collectBookingFields() {
+  return {
+    custName: document.getElementById('bkName').value.trim(),
+    phone: document.getElementById('bkPhone').value.trim(),
+    email: document.getElementById('bkEmail').value.trim(),
+    country: document.getElementById('bkCountry').value,
+    services: getSelectedServices(),
+    costPaid: document.getElementById('bkCost').value,
+    visaFee: document.getElementById('bkVisa').value,
+    otherFee: document.getElementById('bkOther').value,
+    serviceFee: document.getElementById('bkService').value,
+    gstPct: document.getElementById('bkGstPct').value,
+    tdsPct: document.getElementById('bkTdsPct').value,
+    tcsPct: document.getElementById('bkTcsPct').value,
+    grandTotal: document.getElementById('bkGrandTotal').value,
+    status: document.getElementById('bkStatus').value,
+    bookingDate: document.getElementById('bkDate').value
+  };
+}
+
+function saveBooking() {
+  const fields = collectBookingFields();
+  if (!fields.custName) { showToast('Customer name is required', 'error'); return; }
+  const { paymentMode, transferAccount } = getPaymentData();
+  if (!paymentMode) { showToast('Payment mode is mandatory', 'error'); return; }
+  if (paymentMode === 'Online' && !transferAccount) { showToast('Please select the transfer account', 'error'); return; }
+
+  const bookings = getData('etg_bookings');
+  const custCode = getNextId('customer');
+  const booking = { custCode, ...fields, paymentMode, transferAccount };
+  bookings.push(booking);
+  setData('etg_bookings', bookings);
+
+  let customers = getData('etg_customers') || [];
+  if (!customers.find(c => c.code === custCode)) {
+    customers.push({ code: custCode, name: fields.custName, phone: fields.phone, email: fields.email, address: '', createdDate: fields.bookingDate });
+    setData('etg_customers', customers);
+  }
+  closeModal(); renderOnboard(); showToast('Booking created! Code: ETG-' + custCode, 'success');
+}
+
+function editBooking(custCode) {
+  const b = (getData('etg_bookings')||[]).find(x => x.custCode == custCode);
+  if (b) openBookingModal(b);
+}
+
+function saveEditBooking(custCode) {
+  const bookings = getData('etg_bookings');
+  const idx = bookings.findIndex(b => b.custCode == custCode);
+  if (idx === -1) return;
+  const { paymentMode, transferAccount } = getPaymentData();
+  if (!paymentMode) { showToast('Payment mode is mandatory', 'error'); return; }
+  if (paymentMode === 'Online' && !transferAccount) { showToast('Please select the transfer account', 'error'); return; }
+
+  bookings[idx] = { ...bookings[idx], ...collectBookingFields(), paymentMode, transferAccount };
+  setData('etg_bookings', bookings);
+  closeModal(); renderOnboard(); showToast('Booking updated!', 'success');
+}
+
+function deleteBooking(custCode) {
+  if (!confirm('Delete this booking?')) return;
+  let bookings = getData('etg_bookings');
+  bookings = bookings.filter(b => b.custCode != custCode);
+  setData('etg_bookings', bookings);
+  renderOnboard(); showToast('Booking deleted', 'success');
+}
